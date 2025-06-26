@@ -9,6 +9,7 @@ on:
 jobs:
   trigger-dispatch:
     runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[auto-sync]')"  # 🛡 prevent loops
     steps:
       - name: Dispatch reverse sync to shared-resources
         run: |
