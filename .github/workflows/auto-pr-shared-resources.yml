@@ -13,7 +13,33 @@ jobs:
   open-pr:
     runs-on: ubuntu-latest
     steps:
+      - name: Check if PR already exists
+        id: check-pr
+        run: |
+          EXISTING_PR=$(curl -s \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls?head=${{ github.repository_owner }}:sync-auto&state=open" \
+            | jq '.[0].number')
+
+          if [ "$EXISTING_PR" != "null" ] && [ -n "$EXISTING_PR" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "number=$EXISTING_PR" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log existing PR
+        if: steps.check-pr.outputs.exists == 'true'
+        run: |
+          echo "⚠️ PR already exists: #${{ steps.check-pr.outputs.number }}"
+          echo "GitHub will automatically update it with the latest sync-auto content."
+          echo "No action needed - exiting successfully."
+
       - name: Create Pull Request via REST API
+        if: steps.check-pr.outputs.exists == 'false'
         run: |
           curl -X POST \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
@@ -27,5 +53,7 @@ jobs:
             "body": "Automated sync update from \`SRR-shared-resources\`. Please review and merge."
           }
           EOF
+
+          echo "✅ Pull request created successfully"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

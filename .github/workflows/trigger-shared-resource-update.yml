@@ -11,15 +11,56 @@ jobs:
     runs-on: ubuntu-latest
     if: "!contains(github.event.head_commit.message, '[auto-sync]')"
     steps:
-      - name: Dispatch reverse sync to shared-resources
+      - name: Checkout consumer repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 2  # Need last 2 commits for diff
+
+      - name: Determine changed folders
+        id: changed-folders
         run: |
-          curl -X POST \
-            -H "Authorization: token ${{ secrets.SHARED_REPO_PAT }}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/moophat/SRR-shared-resources/dispatches \
-            -d '{
-              "event_type": "push-upstream",
-              "client_payload": {
-                "consumer": "audit-tool"
-              }
-            }'
+          # Get list of changed files in last commit
+          CHANGED_FILES=$(git diff-tree --no-commit-id --name-only -r HEAD)
+
+          # Map consumer paths to shared folder names
+          FOLDERS=""
+          if echo "$CHANGED_FILES" | grep -q "^network_template/jsnapy/"; then
+            FOLDERS="$FOLDERS jsnapy"
+          fi
+          if echo "$CHANGED_FILES" | grep -q "^network_template/robottest/"; then
+            FOLDERS="$FOLDERS robottest"
+          fi
+          if echo "$CHANGED_FILES" | grep -q "^network_template/tableview/"; then
+            FOLDERS="$FOLDERS tableview"
+          fi
+
+          echo "folders=$FOLDERS" >> $GITHUB_OUTPUT
+          echo "Changed folders: $FOLDERS"
+
+      - name: Send repository_dispatch for each changed folder
+        if: steps.changed-folders.outputs.folders != ''
+        env:
+          SHARED_REPO_PAT: ${{ secrets.SHARED_REPO_PAT }}
+        run: |
+          COMMIT_SHA="${{ github.sha }}"
+          COMMIT_MSG=$(git log -1 --pretty=%B | head -n1)
+
+          for folder in ${{ steps.changed-folders.outputs.folders }}; do
+            echo "📤 Dispatching upstream sync for folder: $folder"
+
+            curl -X POST \
+              -H "Authorization: token $SHARED_REPO_PAT" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/moophat/SRR-shared-resources/dispatches \
+              -d "{
+                \"event_type\": \"push-upstream\",
+                \"client_payload\": {
+                  \"consumer\": \"audit-tool\",
+                  \"folder\": \"$folder\",
+                  \"commit_sha\": \"$COMMIT_SHA\",
+                  \"commit_message\": \"$COMMIT_MSG\"
+                }
+              }"
+
+            echo "✅ Dispatch sent for $folder"
+          done
